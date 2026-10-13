@@ -26,8 +26,22 @@ class DKBSign:
         }
 
     @staticmethod
-    def _image_mime_type():
-        return "image/png"
+    def _image_mime_type(path: str | Path) -> str:
+        suffix = Path(path).suffix.lower()
+        return {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+        }.get(suffix, "image/png")
+
+    def reset(self):
+        """Réinitialise document, image, emplacements et niveau de signature."""
+        self.document = None
+        self.signature_image_file = None
+        self.signature_level_value = SignatureLevel.SIMPLE.value
+        self.pages = []
+        return self
 
     def send_otp(self):
         return self._post_json("/api/v4/sign/otp")
@@ -207,7 +221,9 @@ class DKBSign:
                         "signature_image": (
                             Path(self.signature_image_file).name,
                             image,
-                            self._image_mime_type(),
+                            self._image_mime_type(
+                                self.signature_image_file
+                            ),
                         ),
                     },
                     timeout=self.timeout,
