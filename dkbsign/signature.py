@@ -1,10 +1,10 @@
 from dataclasses import dataclass
 
+from .enums import SignatureType
+from .position import Position
+
 
 @dataclass
 class Signature:
-    position_x: int
-    position_y: int
-    width: int
-    height: int
-    type: str
+    position: Position
+    type: str = SignatureType.SIGNATURE.value
