@@ -1,3 +1,4 @@
+
 import json
 from pathlib import Path
 
@@ -9,11 +10,11 @@ from .signature import Signature
 
 
 class DKBSign:
-       def __init__(self, base_url: str, api_token: str, timeout: int = 30):
+    def __init__(self, base_url: str, api_token: str, timeout: int = 30):
         self.base_url = base_url.rstrip("/")
         self.api_token = api_token
         self.timeout = timeout
-        self.session = requests.Session() 
+        self.session = requests.Session()
         self.document = None
         self.signature_image_file = None
         self.signature_level_value = SignatureLevel.SIMPLE.value
@@ -22,18 +23,62 @@ class DKBSign:
         self.headers = {
             "Authorization": f"Bearer {self.api_token}",
             "Accept": "application/json",
-        } 
+        }
 
-        
-       @staticmethod
-       def _image_mime_type():
+    @staticmethod
+    def _image_mime_type():
         return "image/png"
 
+    def send_otp(self):
+        return self._post_json("/api/v4/sign/otp")
 
-       def send_otp(self):
-        return self._post_json("/api/v4/sign/otp") 
-    
-       def _post_json(self, path: str):
+    def send_whatsapp_otp(
+        self, phone_number: str, message: str
+    ):
+        if not phone_number.startswith("+"):
+            raise ValueError(
+                "Le numéro doit commencer par + et inclure "
+                "l'indicatif du pays."
+            )
+
+        if len(message) > 255:
+            raise ValueError(
+                "Le message ne doit pas dépasser 255 caractères."
+            )
+
+        try:
+            response = self.session.post(
+                f"{self.base_url}/api/notifications/sms",
+                headers=self.headers,
+                json={
+                    "channel": "whatsapp",
+                    "phone_number": phone_number,
+                    "message": message,
+                },
+                timeout=self.timeout,
+            )
+        except requests.RequestException as exc:
+            raise DKBSignAPIError(
+                f"Erreur lors de l'envoi WhatsApp : {exc}"
+            ) from exc
+
+        if response.status_code != 202:
+            raise DKBSignAPIError(
+                f"Échec de la notification WhatsApp : "
+                f"HTTP {response.status_code} - {response.text}"
+            )
+
+        try:
+            body = response.json()
+        except ValueError:
+            body = {"message": response.text}
+
+        return {
+            "status_code": response.status_code,
+            "body": body,
+        }
+
+    def _post_json(self, path: str):
         try:
             response = self.session.post(
                 f"{self.base_url}{path}",
@@ -42,12 +87,14 @@ class DKBSign:
                 timeout=self.timeout,
             )
         except requests.RequestException as exc:
-            raise DKBSignAPIError(f"Erreur réseau : {exc}") from exc
+            raise DKBSignAPIError(
+                f"Erreur réseau : {exc}"
+            ) from exc
 
-        return self._handle_response(response)  
+        return self._handle_response(response)
 
-       @staticmethod
-       def _handle_response(response):
+    @staticmethod
+    def _handle_response(response):
         try:
             body = response.json()
         except ValueError:
@@ -65,33 +112,45 @@ class DKBSign:
 
         return result
 
-
-
-       def set_file(self, file_path: str):
+    def set_file(self, file_path: str):
         path = Path(file_path)
+
         if not path.is_file():
-            raise FileNotFoundError(f"PDF introuvable : {file_path}")
+            raise FileNotFoundError(
+                f"PDF introuvable : {file_path}"
+            )
+
         self.document = str(path.resolve())
         return self
 
-       def set_signature_image(self, image_path: str):
+    def set_signature_image(self, image_path: str):
         path = Path(image_path)
+
         if not path.is_file():
-            raise FileNotFoundError(f"Image introuvable : {image_path}")
+            raise FileNotFoundError(
+                f"Image introuvable : {image_path}"
+            )
+
         self.signature_image_file = str(path.resolve())
         return self
 
-       def set_signature_level(self, level):
+    def set_signature_level(self, level):
         if isinstance(level, SignatureLevel):
             level = level.value
+
         self.signature_level_value = str(level)
         return self
 
-       def add_signature(self, page: int, signatures: list[Signature]):
+    def add_signature(self, page: int, signatures: list[Signature]):
         if page < 0:
-            raise ValueError("La page ne peut pas être négative.")
+            raise ValueError(
+                "La page ne peut pas être négative."
+            )
+
         if not signatures:
-            raise ValueError("Il faut au moins une signature.")
+            raise ValueError(
+                "Il faut au moins une signature."
+            )
 
         self.pages.append({
             "page": page,
@@ -106,17 +165,24 @@ class DKBSign:
                 for item in signatures
             ],
         })
+
         return self
 
-       def self_sign(self, otp_code: str | int):
+    def self_sign(self, otp_code: str | int):
         if not self.document:
-            raise ValueError("Appelle set_file() avant self_sign().")
+            raise ValueError(
+                "Appelle set_file() avant self_sign()."
+            )
+
         if not self.signature_image_file:
             raise ValueError(
                 "Appelle set_signature_image() avant self_sign()."
             )
+
         if not self.pages:
-            raise ValueError("Ajoute une signature avant self_sign().")
+            raise ValueError(
+                "Ajoute une signature avant self_sign()."
+            )
 
         params = {
             "pages": self.pages,
@@ -147,7 +213,10 @@ class DKBSign:
                     timeout=self.timeout,
                 )
         except requests.RequestException as exc:
-            raise DKBSignAPIError(f"Erreur réseau : {exc}") from exc
+            raise DKBSignAPIError(
+                f"Erreur réseau : {exc}"
+            ) from exc
 
         return self._handle_response(response)
+
 

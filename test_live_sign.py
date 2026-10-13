@@ -9,7 +9,7 @@ if not token:
     raise SystemExit("Token API absent. Configure-le dans PowerShell.")
 
 pdf_path = "Document_test_.pdf"
-image_path = "signature.jpeg"
+image_path = "signature.png"
 
 if not os.path.isfile(pdf_path):
     raise SystemExit(f"PDF introuvable : {pdf_path}")

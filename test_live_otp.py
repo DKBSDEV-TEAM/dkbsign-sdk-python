@@ -18,4 +18,16 @@ try:
     print("Statut HTTP :", result["status_code"])
     print("Réponse API :", result["body"])
 except Exception as exc:
-    print("Échec du test :", exc)
+    print("Échec du test :", exc) 
+
+
+try:
+    result = client.send_whatsapp_otp(
+        phone_number="+2250173946589",
+        message="Your code is 00990"
+    )
+    print("Statut WhatsApp :", result["status_code"])
+    print("Réponse :", result["body"])
+
+except Exception as exc:
+    print("Échec :", exc)
