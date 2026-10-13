@@ -6,7 +6,7 @@ from dkbsign import DKBSign
 token = os.environ.get("DKBSIGN_API_TOKEN")
 
 if not token:
-    raise SystemExit("Variable DKBSIGN_API_TOKEN absente.")
+    raise SystemExit("DKBSIGN_API_TOKEN variable not found.")
 
 phone = os.environ.get("DKBSIGN_WHATSAPP_PHONE")
 whatsapp_message = os.environ.get(
