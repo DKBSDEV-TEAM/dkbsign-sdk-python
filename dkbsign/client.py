@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 import requests
-
+from contextlib import ExitStack
 from .enums import SignatureLevel
 from .exceptions import DKBSignAPIError
 from .signature import Signature
@@ -23,7 +23,15 @@ class DKBSign:
         self.headers = {
             "Authorization": f"Bearer {self.api_token}",
             "Accept": "application/json",
-        }
+        } 
+
+                # Configuration de la création d'enveloppes
+        self.documents = []
+        self.attachments = {}
+        self.envelope_title = ""
+        self.envelope_description = ""
+        self.signature_order = "ordered"
+        self.signers = []
 
     @staticmethod
     def _image_mime_type(path: str | Path) -> str:
@@ -105,7 +113,88 @@ class DKBSign:
                 f"Erreur réseau : {exc}"
             ) from exc
 
+        return self._handle_response(response) 
+
+    
+    def envelopes(self):
+        """Crée une enveloppe avec plusieurs documents et signataires."""
+        if not self.documents:
+            raise ValueError(
+                "Appelle set_documents() avant envelopes()."
+            )
+
+        if not self.envelope_title:
+            raise ValueError(
+                "Appelle set_envelope_title() avant envelopes()."
+            )
+
+        if not self.signers:
+            raise ValueError(
+                "Appelle set_signers() avant envelopes()."
+            )
+
+        payload = {
+            "title": self.envelope_title,
+            "message": self.envelope_description,
+            "signing_order": self.signature_order,
+            "signature_level": self.signature_level_value,
+            "signers": self.signers,
+        }
+
+        files = []
+
+        try:
+            with ExitStack() as stack:
+                # Documents principaux : documents[]
+                for file_path in self.documents:
+                    stream = stack.enter_context(
+                        open(file_path, "rb")
+                    )
+
+                    files.append((
+                        "documents[]",
+                        (
+                            Path(file_path).name,
+                            stream,
+                            "application/pdf",
+                        ),
+                    ))
+
+                # Pièces jointes : attachments_{index}[]
+                for document_index, paths in self.attachments.items():
+                    for file_path in paths:
+                        stream = stack.enter_context(
+                            open(file_path, "rb")
+                        )
+
+                        files.append((
+                            f"attachments_{document_index}[]",
+                            (
+                                Path(file_path).name,
+                                stream,
+                                "application/pdf"
+                                if Path(file_path).suffix.lower() == ".pdf"
+                                else "application/octet-stream",
+                            ),
+                        ))
+
+                # Le payload est envoyé comme champ multipart.
+                response = self.session.post(
+                    f"{self.base_url}/api/v4/envelopes",
+                    headers=self.headers,
+                    data={"payload": json.dumps(payload)},
+                    files=files,
+                    timeout=self.timeout,
+                )
+
+        except requests.RequestException as exc:
+            raise DKBSignAPIError(
+                f"Erreur réseau lors de la création "
+                f"de l'enveloppe : {exc}"
+            ) from exc
+
         return self._handle_response(response)
+
 
     @staticmethod
     def _handle_response(response):
@@ -153,7 +242,121 @@ class DKBSign:
             level = level.value
 
         self.signature_level_value = str(level)
+        return self 
+
+
+    
+    def set_documents(self, paths: list[str]):
+        """Définit les PDF qui composeront l'enveloppe."""
+        if not paths:
+            raise ValueError("Il faut au moins un document PDF.")
+
+        documents = []
+
+        for file_path in paths:
+            path = Path(file_path)
+
+            if not path.is_file():
+                raise FileNotFoundError(
+                    f"Document introuvable : {file_path}"
+                )
+
+            if path.suffix.lower() != ".pdf":
+                raise ValueError(
+                    f"Le document doit être un PDF : {file_path}"
+                )
+
+            documents.append(str(path.resolve()))
+
+        self.documents = documents
+        self.attachments = {}
         return self
+
+    def set_attachments(
+        self, document_index: int, paths: list[str]
+    ):
+        """Ajoute des pièces jointes à un document de l'enveloppe."""
+        if not self.documents:
+            raise ValueError(
+                "Appelle set_documents() avant set_attachments()."
+            )
+
+        if not 0 <= document_index < len(self.documents):
+            raise ValueError(
+                "L'index du document est invalide."
+            )
+
+        attachments = []
+
+        for file_path in paths:
+            path = Path(file_path)
+
+            if not path.is_file():
+                raise FileNotFoundError(
+                    f"Pièce jointe introuvable : {file_path}"
+                )
+
+            attachments.append(str(path.resolve()))
+
+        self.attachments[document_index] = attachments
+        return self
+
+    def set_envelope_title(self, title: str):
+        if not title or not title.strip():
+            raise ValueError("Le titre est obligatoire.")
+
+        self.envelope_title = title.strip()
+        return self
+
+    def set_envelope_description(self, description: str):
+        self.envelope_description = description
+        return self
+
+    def set_signature_order(self, order: str):
+        if order not in ("ordered", "any"):
+            raise ValueError(
+                "L'ordre doit être 'ordered' ou 'any'."
+            )
+
+        self.signature_order = order
+        return self
+
+    def set_signers(self, signers: list[dict]):
+        """Enregistre les signataires au format API."""
+        if not signers:
+            raise ValueError(
+                "Il faut au moins un signataire."
+            )
+
+        required = (
+            "first_name",
+            "last_name",
+            "email",
+            "phone",
+            "priority",
+            "positions",
+        )
+
+        for index, signer in enumerate(signers):
+            missing = [
+                key for key in required if key not in signer
+            ]
+
+            if missing:
+                raise ValueError(
+                    f"Signataire {index + 1} : "
+                    f"champs manquants : {', '.join(missing)}"
+                )
+
+            if not str(signer["phone"]).startswith("+"):
+                raise ValueError(
+                    f"Le téléphone du signataire {index + 1} "
+                    "doit inclure l'indicatif international."
+                )
+
+        self.signers = signers
+        return self
+
 
     def add_signature(self, page: int, signatures: list[Signature]):
         if page < 0:
